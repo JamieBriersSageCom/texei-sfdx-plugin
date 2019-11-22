@@ -14,7 +14,7 @@ Messages.importMessagesDirectory(__dirname);
 // or any library that is using the messages framework can also be loaded this way.
 const messages = Messages.loadMessages('texei-sfdx-plugin', 'package-dependencies-install');
 
-export default class Install extends SfdxCommand {
+export default class Check extends SfdxCommand {
 
   public static description = messages.getMessage('commandDescription');
 
@@ -136,7 +136,8 @@ export default class Install extends SfdxCommand {
     if (packagesToInstall.length > 0) { // Installing Packages
 
       // Getting currently installed packages
-      let installedPackages;
+      let installedPackagesJSON = '';
+
       const installedArgs = [];
       installedArgs.push('force:package:installed:list');
       installedArgs.push('--targetusername');
@@ -147,15 +148,18 @@ export default class Install extends SfdxCommand {
       var childProcess = promise.childProcess;
 
       childProcess.stdout.on('data', function (data) {
-        installedPackages = JSON.parse(data.toString());
+        installedPackagesJSON += data.toString();
       });
       await promise;
+      this.ux.log(`Installed List: ${installedPackagesJSON}`);
+      let installedPackages = JSON.parse(installedPackagesJSON.toString());
 
       for (let packageInfo of packagesToInstall) {
         packageInfo = packageInfo as JsonMap;
+        let fullPackageId = this.normaliseSforceID(packageInfo.packageVersionId);
 
         var installedPackage = installedPackages["result"].find(obj => {
-          return obj["SubscriberPackageVersionId"] == packageInfo.packageVersionId;
+          return obj["SubscriberPackageVersionId"] == fullPackageId;
         });
 
         if (installedPackage == null) {
@@ -167,6 +171,30 @@ export default class Install extends SfdxCommand {
     }
 
     return { message: result };
+  }
+
+  private normaliseSforceID(id) { // fluff up a 15 char id to return an 18 char id
+    if (id == null) return id;
+    id = id.replace(/\"/g, ''); // scrub quotes from this id
+    if (id.length == 18) {
+      return id;
+    }
+    var suffix = "";
+    for (var i = 0; i < 3; i++) {
+      var flags = 0;
+      for (var j = 0; j < 5; j++) {
+        var c = id.charAt(i * 5 + j);
+        if (c >= 'A' && c <= 'Z') {
+          flags += 1 << j;
+        }
+      }
+      if (flags <= 25) {
+        suffix += "ABCDEFGHIJKLMNOPQRSTUVWXYZ".charAt(flags);
+      } else {
+        suffix += "012345".charAt(flags - 26);
+      }
+    }
+    return id + suffix;
   }
 
   private async getPackageVersionId(name: string, version: string, namespaces: string[]) {
